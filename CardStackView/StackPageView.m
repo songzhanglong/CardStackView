@@ -81,8 +81,9 @@
         self.selectedPageIndex = 0;
     }
     
-    [self calculateVisibleRows];
-    [self reloadVisiblePages];
+    
+    [self calculateVisibleRowsByStop];
+    [self reloadVisiblePagesAtInit];
 }
 
 #pragma mark - setup
@@ -102,19 +103,11 @@
     [self addGestureRecognizer:pan];
 }
 
-#pragma mark - range
-- (void)calculateVisibleRows
+#pragma mark - reload
+//初始化时的页面加载
+- (void)reloadVisiblePagesAtInit
 {
-    if (self.pages == 0) {
-        return;
-    }
-
-    //初始为0
     NSInteger start = self.selectedPageIndex;
-    CGFloat residueHei = CGRectGetHeight(self.frame) - self.bigHeight;
-    NSInteger number = ceilf(residueHei / self.smallHeight);
-    //多加一行，避免突兀
-    self.visiblePages = NSMakeRange(start, MIN(self.pageCount - start, number + 1 + 1));
     NSInteger endIndex = start + _visiblePages.length - 1;
     for (NSInteger i = start; i <= endIndex; i++) {
         [self setPageAtIndex:i frame:CGRectNull];
@@ -129,7 +122,62 @@
     }
 }
 
-- (void)calculateVisibleRows2:(CGFloat)offsetY
+//动画停止时的页面加载
+- (void)reloadVisiblePagesAtAnimationStop
+{
+    UIView *firstPage = self.pages[self.selectedPageIndex],*lastPage = nil;
+    NSInteger firIdx = 0,lastIdx = 0;
+    for (NSInteger i = _selectedPageIndex - 1; i >= 0; i--) {
+        UIView *subPage = self.pages[i];
+        if ((NSObject *)subPage == [NSNull null]) {
+            break;
+        }
+        firstPage = subPage;
+        firIdx = i;
+    }
+    for (NSInteger i = _selectedPageIndex; i < [self.pages count]; i++) {
+        UIView *subPage = self.pages[i];
+        if ((NSObject *)subPage == [NSNull null]) {
+            break;
+        }
+        lastPage = subPage;
+        lastIdx = i;
+    }
+    
+    for (NSInteger i = firIdx - 1; i >= (NSInteger)_visiblePages.location; i--) {
+        [self setPageAtIndex:i frame:CGRectMake(0, firstPage.frame.origin.y - _bigHeight, CGRectGetWidth(self.frame), _bigHeight)];
+        firstPage = self.pages[i];
+    }
+    
+    for (NSInteger i = lastIdx + 1; i <= MIN(_visiblePages.length + _visiblePages.location - 1, self.pageCount - 1); i++) {
+        [self setPageAtIndex:i frame:CGRectMake(0, lastPage.frame.origin.y + lastPage.frame.size.height, CGRectGetWidth(self.frame), _smallHeight)];
+        lastPage = self.pages[i];
+    }
+}
+
+#pragma mark - range
+//停止时的可见区域计算
+- (void)calculateVisibleRowsByStop
+{
+    if (self.pages == 0) {
+        return;
+    }
+    //初始为0
+    NSInteger start = self.selectedPageIndex;
+    //除去第一行，剩下的可见行数
+    CGFloat residueHei = CGRectGetHeight(self.frame) - self.bigHeight;
+    NSInteger number = ceilf(residueHei / self.smallHeight) + 1 + 1;
+    if (start > 0) {
+        start--;
+        number++;
+    }
+    
+    //多加一行，避免突兀
+    self.visiblePages = NSMakeRange(start, MIN(self.pageCount - start, number));
+}
+
+//移动时的可见区域计算
+- (void)calculateVisibleByMoving:(CGFloat)offsetY
 {
     if (self.pages == 0) {
         return;
@@ -159,6 +207,7 @@
 
 - (void)relayoutSubViews:(CGRect)curRect Hei:(CGFloat)newHei
 {
+    //newHei，紧邻当前页下一个页面的高度，如当前页y坐标<0，则为重新计算的高度，如>0，则为最低高度
     CGFloat tmpPreY = curRect.origin.y + curRect.size.height;
     for (NSInteger i = _selectedPageIndex + 1; i <= _visiblePages.location + _visiblePages.length - 1; i++) {
         UIView *nextPage = self.pages[i];
@@ -230,26 +279,6 @@
     }
 }
 
-#pragma mark - display pages
-- (void)reloadVisiblePages
-{
-//    NSInteger start = self.visiblePages.location;
-//    NSInteger stop = self.visiblePages.location + self.visiblePages.length;
-//    
-//    for (NSInteger i = start; i < stop; i++) {
-//        UIView *page = [self.pages objectAtIndex:i];
-//        
-//        if (i == 0 || [self.pages objectAtIndex:i-1] == [NSNull null]) {
-//            page.layer.transform = CATransform3DMakeScale(MINIMUM_SCALE, MINIMUM_SCALE, 1.f);
-//        } else{
-//            [UIView beginAnimations:@"stackScrolling" context:nil];
-//            [UIView setAnimationDuration:.4f];
-//            page.layer.transform = CATransform3DMakeScale(MINIMUM_SCALE, MINIMUM_SCALE, 1.f);
-//            [UIView commitAnimations];
-//        }
-//    }
-}
-
 #pragma mark - reuse methods
 - (void)enqueueReusablePage:(UIView *)page
 {
@@ -312,55 +341,28 @@
         CGRect pageFrame = curView.frame;
         pageFrame.origin.y += curPoint.y - _beginPoint.y;
         if (pageFrame.origin.y <= -_bigHeight){
+            //上滑过最上面一页高度，当前页往下加1
             if (self.selectedPageIndex < self.pageCount - 1) {
                 self.selectedPageIndex++;
             }
         }
         else if (pageFrame.origin.y < 0) {
+            //上滑不超过一个视图，此时往下一个视图高度渐变
             pageFrame.size.height = _bigHeight;
             
             CGFloat tmpPreY = pageFrame.origin.y + pageFrame.size.height;
             CGFloat changeHei = _bigHeight - tmpPreY * (_bigHeight - _smallHeight) / _bigHeight;
             [self relayoutSubViews:pageFrame Hei:changeHei];
-            /*
-            for (NSInteger i = _selectedPageIndex + 1; i <= _visiblePages.location + _visiblePages.length - 1; i++) {
-                UIView *nextPage = self.pages[i];
-                if ((NSObject *)nextPage == [NSNull null]) {
-                    [self setPageAtIndex:i frame:CGRectMake(0, tmpPreY, CGRectGetWidth(self.frame), _smallHeight)];
-                    nextPage = self.pages[i];
-                }
-                CGRect tmpRect = nextPage.frame;
-                tmpRect.origin.y = tmpPreY;
-                if (i == _selectedPageIndex + 1) {
-                    tmpRect.size.height = changeHei;
-                }
-                
-                nextPage.frame = tmpRect;
-                tmpPreY += tmpRect.size.height;
-            }
-            
-            tmpPreY = pageFrame.origin.y;
-            for (NSInteger i = _selectedPageIndex - 1; i >= (NSInteger)_visiblePages.location; i--) {
-                UIView *prePage = [self.pages objectAtIndex:i];
-                if ((NSObject *)prePage == [NSNull null]) {
-                    [self setPageAtIndex:i frame:CGRectMake(0, tmpPreY - _bigHeight, CGRectGetWidth(self.frame), _bigHeight)];
-                    prePage = self.pages[i];
-                }
-                CGRect tmpRc = prePage.frame;
-                tmpRc.origin.y = tmpPreY - _bigHeight;
-                tmpRc.size.height = _bigHeight;
-                [prePage setFrame:tmpRc];
-                
-                tmpPreY -= tmpRc.size.height;
-            }*/
         }
         else if (pageFrame.origin.y >= _bigHeight){
+            //下滑超过最上面一页高度，当前页往上移动一位
             pageFrame.size.height = _smallHeight;
             if (self.selectedPageIndex > 0) {
                 self.selectedPageIndex--;
             }
         }
         else{
+            //下滑不超过最上面一页高度，调整当前页高度
             if (self.selectedPageIndex == 0) {
                 //限制上边空白
                 if (pageFrame.origin.y > TOP_MARGIN) {
@@ -371,35 +373,6 @@
             CGFloat changeHei = pageFrame.origin.y * (_bigHeight - _smallHeight) / _bigHeight;
             pageFrame.size.height = _bigHeight - changeHei;
             [self relayoutSubViews:pageFrame Hei:_smallHeight];
-            /*
-            CGFloat tmpPreY = pageFrame.origin.y + pageFrame.size.height;
-            for (NSInteger i = _selectedPageIndex + 1; i <= _visiblePages.location + _visiblePages.length - 1; i++) {
-                UIView *nextPage = self.pages[i];
-                if ((NSObject *)nextPage == [NSNull null]) {
-                    [self setPageAtIndex:i frame:CGRectMake(0, tmpPreY, CGRectGetWidth(self.frame), _smallHeight)];
-                    nextPage = self.pages[i];
-                }
-                CGRect tmpRect = nextPage.frame;
-                tmpRect.origin.y = tmpPreY;
-                
-                nextPage.frame = tmpRect;
-                tmpPreY += tmpRect.size.height;
-            }
-            
-            tmpPreY = pageFrame.origin.y;
-            for (NSInteger i = _selectedPageIndex - 1; i >= (NSInteger)_visiblePages.location; i--) {
-                UIView *prePage = [self.pages objectAtIndex:i];
-                if ((NSObject *)prePage == [NSNull null]) {
-                    [self setPageAtIndex:i frame:CGRectMake(0, tmpPreY - _bigHeight, CGRectGetWidth(self.frame), _bigHeight)];
-                    prePage = self.pages[i];
-                }
-                CGRect tmpRc = prePage.frame;
-                tmpRc.origin.y = tmpPreY - _bigHeight;
-                tmpRc.size.height = _bigHeight;
-                [prePage setFrame:tmpRc];
-                
-                tmpPreY -= tmpRc.size.height;
-            }*/
         }
         
         //尾部视图判断是否添加
@@ -409,15 +382,7 @@
         }
         
         //重新计算可视区域数据
-        [self calculateVisibleRows2:pageFrame.origin.y];
-//        NSInteger endIndex = _visiblePages.location + _visiblePages.length - 1;
-//        for (NSInteger i = 0; i < _visiblePages.location; i++) {
-//            [self removePageAtIndex:i];
-//        }
-//        
-//        for (NSInteger i = endIndex + 1; i < [self.pages count]; i++) {
-//            [self removePageAtIndex:i];
-//        }
+        [self calculateVisibleByMoving:pageFrame.origin.y];
         
         self.isUpDirect = (curPoint.y < self.beginPoint.y);
         self.beginPoint = curPoint;
@@ -434,7 +399,6 @@
             }
         }
         
-        
         [self playEndAnimation];
     }
 }
@@ -442,67 +406,12 @@
 #pragma mark - end animation
 - (void)playEndAnimation
 {
-    [self calculateVisibleRows2:0];
-    UIView *firstPage = self.pages[self.selectedPageIndex],*lastPage = nil;
-    NSInteger firIdx = 0,lastIdx = 0;
-    for (NSInteger i = _selectedPageIndex - 1; i >= 0; i--) {
-        UIView *subPage = self.pages[i];
-        if ((NSObject *)subPage == [NSNull null]) {
-            break;
-        }
-        firstPage = subPage;
-        firIdx = i;
-    }
-    for (NSInteger i = _selectedPageIndex; i < [self.pages count]; i++) {
-        UIView *subPage = self.pages[i];
-        if ((NSObject *)subPage == [NSNull null]) {
-            break;
-        }
-        lastPage = subPage;
-        lastIdx = i;
-    }
-    
-    for (NSInteger i = firIdx - 1; i >= (NSInteger)_visiblePages.location; i--) {
-        [self setPageAtIndex:i frame:CGRectMake(0, firstPage.frame.origin.y - _bigHeight, CGRectGetWidth(self.frame), _bigHeight)];
-        firstPage = self.pages[i];
-    }
-    
-    for (NSInteger i = lastIdx + 1; i <= MIN(_visiblePages.length + _visiblePages.location - 1, self.pageCount - 1); i++) {
-        [self setPageAtIndex:i frame:CGRectMake(0, lastPage.frame.origin.y + lastPage.frame.size.height, CGRectGetWidth(self.frame), _smallHeight)];
-        lastPage = self.pages[i];
-    }
+    [self calculateVisibleRowsByStop];
+    [self reloadVisiblePagesAtAnimationStop];
     
     self.userInteractionEnabled = NO;
     [UIView animateWithDuration:0.3 animations:^{
-        
-        NSInteger start = self.selectedPageIndex;
-        UIView *page = [self.pages objectAtIndex:start];
-        CGRect pageRect = page.frame;
-        pageRect.origin.y = 0;
-        pageRect.size.height = self.bigHeight;
-        page.frame = pageRect;
-        
-        CGFloat yOri = pageRect.origin.y + pageRect.size.height;
-        for (NSInteger i = start + 1; i < _visiblePages.location + _visiblePages.length; i++) {
-            UIView *nextPage = [self.pages objectAtIndex:i];
-            CGRect tmpRc = nextPage.frame;
-            tmpRc.origin.y = yOri;
-            tmpRc.size.height = _smallHeight;
-            [nextPage setFrame:tmpRc];
-            
-            yOri += tmpRc.size.height;
-        }
-        
-        yOri = pageRect.origin.y;
-        for (NSInteger i = start - 1; i >= (NSInteger)_visiblePages.location; i--) {
-            UIView *prePage = [self.pages objectAtIndex:i];
-            CGRect tmpRc = prePage.frame;
-            tmpRc.origin.y = yOri - _bigHeight;
-            tmpRc.size.height = _bigHeight;
-            [prePage setFrame:tmpRc];
-            
-            yOri -= tmpRc.size.height;
-        }
+        [self resetVisiblePagesLocation];
     } completion:^(BOOL finished) {
         NSInteger endIndex = _visiblePages.location + _visiblePages.length - 1;
         for (NSInteger i = 0; i < _visiblePages.location; i++) {
@@ -515,6 +424,38 @@
         
         self.userInteractionEnabled = YES;
     }];
+}
+
+- (void)resetVisiblePagesLocation
+{
+    NSInteger start = self.selectedPageIndex;
+    UIView *page = [self.pages objectAtIndex:start];
+    CGRect pageRect = page.frame;
+    pageRect.origin.y = 0;
+    pageRect.size.height = self.bigHeight;
+    page.frame = pageRect;
+    
+    CGFloat yOri = pageRect.origin.y + pageRect.size.height;
+    for (NSInteger i = start + 1; i < _visiblePages.location + _visiblePages.length; i++) {
+        UIView *nextPage = [self.pages objectAtIndex:i];
+        CGRect tmpRc = nextPage.frame;
+        tmpRc.origin.y = yOri;
+        tmpRc.size.height = _smallHeight;
+        [nextPage setFrame:tmpRc];
+        
+        yOri += tmpRc.size.height;
+    }
+    
+    yOri = pageRect.origin.y;
+    for (NSInteger i = start - 1; i >= (NSInteger)_visiblePages.location; i--) {
+        UIView *prePage = [self.pages objectAtIndex:i];
+        CGRect tmpRc = prePage.frame;
+        tmpRc.origin.y = yOri - _bigHeight;
+        tmpRc.size.height = _bigHeight;
+        [prePage setFrame:tmpRc];
+        
+        yOri -= tmpRc.size.height;
+    }
 }
 
 @end

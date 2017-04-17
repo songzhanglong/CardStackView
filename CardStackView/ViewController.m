@@ -28,7 +28,7 @@
     [super viewDidLoad];
     // Do any additional setup after loading the view, typically from a nib.
     
-    [self.view addSubview:self.collectionView];
+    [self.view addSubview:self.pageView];
 }
 
 #pragma mark - StackPageViewDelegate
@@ -38,7 +38,15 @@
     if (!thisView) {
         thisView = [UIView new];
         thisView.backgroundColor = [UIColor getRandomColor];
+        
+        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(10, 0, 60, 20)];
+        [label setTag:1];
+        [thisView addSubview:label];
     }
+    
+    UILabel *label = (UILabel *)[thisView viewWithTag:1];
+    [label setText:@(index).stringValue];
+    
     return thisView;
 }
 
